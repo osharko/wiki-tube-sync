@@ -582,22 +582,33 @@ def cmd_mark_live() -> int:
 
 
 def cmd_refresh_all() -> int:
-    """Refresh METADATI (no subs) per tutti i canali in config.yaml + backfill thumbs.
-    Aggiorna views/like e scarica le thumbnail mancanti senza 429 sui sottotitoli."""
+    """Refresh METADATI (volatili: views/like, no subs) per i video esistenti,
+    importa i NUOVI video (metadata+thumb+transcript) e backfilla SOLO le
+    thumbnail mancanti (non ri-scarica quelle già presenti)."""
     cfg = load_config()
-    ok = fail = 0
+    ok = fail = new = 0
     for ch in cfg["channels"]:
-        print(f"refresh metadati: {ch.get('name')}")
+        print(f"canale: {ch.get('name')}")
         for e in discover_channel(ch["url"]):
             vid = e["id"]
             if is_blacklisted(vid):
                 continue
-            if refresh_video_meta(vid):
-                ok += 1
+            if find_folder(vid) is None:
+                # NUOVO video: import (info+subs+thumb)
+                try:
+                    ids = download(f"https://youtu.be/{vid}")
+                    for v in (ids or [vid]):
+                        ingest_video(v, source=f"https://youtu.be/{vid}", video_type_hint=e.get("type"))
+                    new += 1
+                except Exception:
+                    fail += 1
             else:
-                fail += 1
-    print(f"refresh metadati ok={ok} fail={fail}")
-    cmd_thumbs()
+                if refresh_video_meta(vid):   # solo metadati (views/like), NO subs, NO thumb
+                    ok += 1
+                else:
+                    fail += 1
+    print(f"refresh-all: metadati={ok} nuovi={new} falliti={fail}")
+    cmd_thumbs()   # backfill SOLO thumbnail mancanti
     return link_pages() or 0
 
 
