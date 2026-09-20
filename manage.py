@@ -295,13 +295,29 @@ una due tre primo seconda terzo volta volte bene male peggio meglio cosa cose ni
 nulla tutti tutto qualcosa nessuno nessuna qualcuno qualche""".split())
 
 
+LEMMA = False   # attivo con `manage.py link --lemma`
+
+
+def _stem(w: str) -> str:
+    """Lemmatizzazione it conservativa (plurale/gender -> singolare approssimato)."""
+    if len(w) <= 5:
+        return w
+    if w.endswith("ci") or w.endswith("gi") or w.endswith("che") or w.endswith("ghe"):
+        return w
+    if w.endswith("i") and not w.endswith("ia") and not w.endswith("io"):
+        return w[:-1] + "o"
+    if w.endswith("e") and not w.endswith("ie"):
+        return w[:-1] + "a"
+    return w
+
+
 def _tokens(text: str):
     import re as _re
     for w in _re.findall(r"[A-Za-zÀ-ÿ]{4,}", text):
         lw = w.lower()
         if lw in STOPWORDS:
             continue
-        yield lw
+        yield _stem(lw) if LEMMA else lw
 
 
 def keyphrases(text: str) -> dict[str, int]:
@@ -554,6 +570,32 @@ def cmd_mark_live() -> int:
     return link_pages() or 0
 
 
+def cmd_thumbs() -> int:
+    """Scarica le thumbnail mancanti nelle cartelle delle pagine (da info.json)."""
+    import urllib.request
+    n = 0
+    for jf in RAW.glob("*.info.json"):
+        vid = jf.stem.replace(".info", "")
+        d = find_folder(vid)
+        if d is None:
+            continue
+        pj = d / "thumbnail.jpg"
+        if pj.exists():
+            continue
+        try:
+            j = json.loads(jf.read_text(encoding="utf-8"))
+            u = j.get("thumbnail")
+            if not u:
+                continue
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+            pj.write_bytes(urllib.request.urlopen(req, timeout=30).read())
+            n += 1
+        except Exception:
+            continue
+    print(f"thumbs: {n} thumbnail aggiunte")
+    return 0
+
+
 def cmd_status() -> int:
     have = sorted(p.stem.replace(".info", "") for p in RAW.glob("*.info.json"))
     cfg = load_config()
@@ -774,6 +816,8 @@ def main(argv: list[str]) -> int:
     if cmd == "build":
         return cmd_build()
     if cmd == "link":
+        global LEMMA
+        LEMMA = "--lemma" in rest
         return link_pages()
     if cmd == "playlists":
         return cmd_playlists()
@@ -785,6 +829,8 @@ def main(argv: list[str]) -> int:
         return cmd_mark_live()
     if cmd == "seedlive":
         return cmd_seed_live()
+    if cmd == "thumbs":
+        return cmd_thumbs()
     if cmd == "status":
         return cmd_status()
     print(__doc__)

@@ -292,6 +292,16 @@ def ingest_video(vid: str, source: str | None = None, video_type_hint: str | Non
         '',
     ]
     page_f.write_text('\n'.join(fm), encoding='utf-8')
+
+    # thumbnail nella cartella della pagina
+    th = meta.get('thumbnail')
+    if th:
+        try:
+            import urllib.request
+            req = urllib.request.Request(th, headers={'User-Agent': 'Mozilla/5.0'})
+            (page_dir / 'thumbnail.jpg').write_bytes(urllib.request.urlopen(req, timeout=25).read())
+        except Exception:
+            pass
     print(f"[ok] {vid}  '{title}'  {len(paras)} block, {len(chapters)} chapters, dur={meta.get('duration_string','')}")
     return True
 
