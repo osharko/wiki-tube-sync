@@ -13,8 +13,9 @@ import re
 import sys
 from pathlib import Path
 
-RAW = Path("/mnt/data/wiki/raw_subs")
-OUT = Path("/mnt/data/wiki/wiki-src/content")
+# Percorsi configurabili via env (per il container cron di mortewiki)
+RAW = Path(os.environ.get("RAW_DIR", "/mnt/data/wiki/raw_subs"))
+OUT = Path(os.environ.get("WIKI_CONTENT", "/mnt/data/wiki/wiki-src/content"))
 
 SENT_END = re.compile(r'[.!?…]\s*$')
 CLEAN = re.compile(r'<[^>]+>')
