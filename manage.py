@@ -502,6 +502,24 @@ def cmd_build() -> int:
     return link_pages() or 0
 
 
+def cmd_seed_live() -> int:
+    """Crea stub per le live della tab /streams (video_type: live) così popolano il filtro."""
+    cfg = load_config()
+    made = 0
+    for ch in cfg["channels"]:
+        tab = ch["url"].replace("/videos", "/streams")
+        if tab == ch["url"]:
+            continue
+        for e in discover(tab):
+            if has_raw(e["id"]) or has_page(e["id"]):
+                continue
+            e["type"] = "live"
+            if create_stub(e, ch.get("name", "")):
+                made += 1
+    print(f"seed_live: {made} live stub creati")
+    return link_pages() or 0
+
+
 def cmd_mark_live() -> int:
     """Rimarca `video_type: live` su tutti i video presenti nella tab /streams."""
     cfg = load_config()
@@ -756,6 +774,8 @@ def main(argv: list[str]) -> int:
         return cmd_migrate()
     if cmd == "marklive":
         return cmd_mark_live()
+    if cmd == "seedlive":
+        return cmd_seed_live()
     if cmd == "status":
         return cmd_status()
     print(__doc__)
