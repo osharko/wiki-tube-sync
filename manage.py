@@ -581,6 +581,26 @@ def cmd_mark_live() -> int:
     return link_pages() or 0
 
 
+def cmd_refresh_all() -> int:
+    """Refresh METADATI (no subs) per tutti i canali in config.yaml + backfill thumbs.
+    Aggiorna views/like e scarica le thumbnail mancanti senza 429 sui sottotitoli."""
+    cfg = load_config()
+    ok = fail = 0
+    for ch in cfg["channels"]:
+        print(f"refresh metadati: {ch.get('name')}")
+        for e in discover_channel(ch["url"]):
+            vid = e["id"]
+            if is_blacklisted(vid):
+                continue
+            if refresh_video_meta(vid):
+                ok += 1
+            else:
+                fail += 1
+    print(f"refresh metadati ok={ok} fail={fail}")
+    cmd_thumbs()
+    return link_pages() or 0
+
+
 def cmd_thumbs() -> int:
     """Scarica le thumbnail mancanti nelle cartelle delle pagine (da info.json)."""
     import urllib.request
