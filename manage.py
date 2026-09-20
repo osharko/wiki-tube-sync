@@ -99,6 +99,17 @@ def has_page(vid: str) -> bool:
     return find_folder(vid) is not None
 
 
+def is_stub_page(vid: str) -> bool:
+    d = find_folder(vid)
+    if d is None:
+        return False
+    f = page_index(d)
+    if f is None:
+        return False
+    meta, _ = parse_md(f)
+    return str(meta.get("stub")) in ("1", "true")
+
+
 def _tags_title(title: str) -> list[str]:
     import re as _re
     stop = set("il lo la i gli le un uno una del della dei degli di da in con su per non e ed o ma che come cosa".split())
@@ -439,7 +450,7 @@ def _sync_one(url: str, force: bool, channel: str = "") -> tuple[int, int]:
     blacklist = set(cfg.get("blacklist") or [])
     entries = discover_channel(url)
     def already(e):
-        return has_raw(e["id"]) or has_page(e["id"])
+        return has_raw(e["id"]) or (has_page(e["id"]) and not is_stub_page(e["id"]))
     todo = [e for e in entries if e["id"] not in blacklist and (force or not already(e))]
     print(f"{len(entries)} video rilevati (incl. shorts); {len(todo)} da processare (blacklist={len(blacklist)})")
     ensure_dirs()
@@ -594,6 +605,41 @@ def cmd_thumbs() -> int:
             continue
     print(f"thumbs: {n} thumbnail aggiunte")
     return 0
+
+
+def cmd_fixlive() -> int:
+    """Importa le live come pagine reali (metadata=data; senza subs per evitare 429),
+    rimuovendo gli stub non datati."""
+    import time, shutil
+    cfg = load_config()
+    fixed = removed = 0
+    for ch in cfg["channels"]:
+        tab = ch["url"].replace("/videos", "/streams")
+        if tab == ch["url"]:
+            continue
+        for e in discover(tab):
+            vid = e["id"]
+            if has_raw(vid) and not is_stub_page(vid):
+                continue
+            try:
+                run_yt(["--skip-download", "--write-info-json", "--no-write-subs",
+                        "-o", str(RAW / "%(id)s.%(ext)s"), "-f", "best", f"https://youtu.be/{vid}"])
+            except Exception:
+                time.sleep(1.5)
+                continue
+            jf = RAW / f"{vid}.info.json"
+            if not jf.exists():
+                time.sleep(1.5)
+                continue
+            d = find_folder(vid)
+            if d and d.is_dir() and d.name == vid:     # cartella stub senza data
+                shutil.rmtree(d, ignore_errors=True)
+                removed += 1
+            if ingest_video(vid):
+                fixed += 1
+            time.sleep(1.5)
+    print(f"fixlive: importate={fixed} stub rimossi={removed}")
+    return link_pages() or 0
 
 
 def cmd_status() -> int:
@@ -831,6 +877,8 @@ def main(argv: list[str]) -> int:
         return cmd_seed_live()
     if cmd == "thumbs":
         return cmd_thumbs()
+    if cmd == "fixlive":
+        return cmd_fixlive()
     if cmd == "status":
         return cmd_status()
     print(__doc__)
