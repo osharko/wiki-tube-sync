@@ -177,6 +177,18 @@ def _frontmatter_field(path: Path, key: str) -> str:
     return (m.group(1).strip() if m else '')
 
 
+def _frontmatter_list(path: Path, key: str) -> list[str]:
+    """Estrae una lista [a, b] di frontmatter da un file .md."""
+    try:
+        t = path.read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return []
+    m = re.search(rf'^{re.escape(key)}\s*:\s*\[(.*?)\]', t, re.M)
+    if not m:
+        return []
+    return [x.strip().strip('"') for x in m.group(1).split(',') if x.strip()]
+
+
 def page_slug(meta: dict, vid: str) -> str:
     """Slug della pagina/cartella: {YYYYMMDD}-{video_id} (come nel link)."""
     d = str(meta.get('upload_date') or '').strip()
@@ -269,7 +281,8 @@ def ingest_video(vid: str, source: str | None = None, video_type_hint: str | Non
         f"playlist_id: \"{pl_id.replace(chr(34), '')}\"",
         f"playlist_index: {pl_idx}",
         f"source: \"{(source or meta.get('source') or '').replace(chr(34), '')}\"",
-        "tags: [" + ", ".join('"%s"' % t for t in tags_from(meta)) + "]",
+        # tags: usa i concetti già presenti (dai correlati), altrimenti da titolo
+        "tags: [" + ", ".join('"%s"' % t for t in (_frontmatter_list(page_f, 'tags') or tags_from(meta))) + "]",
         "description: " + desc_ser,
         '---',
         '',

@@ -182,17 +182,19 @@ def discover(url: str) -> list[dict]:
 
 
 def discover_channel(url: str) -> list[dict]:
-    """Discover ALL uploads of a channel: videos tab + shorts tab (dedup)."""
+    """Discover ALL uploads of a channel: videos + shorts + streams (dedup, con tipo)."""
     vids = discover(url)
     seen = {e["id"] for e in vids}
     for e in vids:
         e["type"] = "video"
-    shorts_url = url.replace("/videos", "/shorts")
-    if shorts_url != url:
+    for tab, typ in [("shorts", "short"), ("streams", "live")]:
+        tab_url = url.replace("/videos", "/" + tab)
+        if tab_url == url:
+            continue
         try:
-            for e in discover(shorts_url):
+            for e in discover(tab_url):
                 if e["id"] not in seen:
-                    e["type"] = "short"
+                    e["type"] = typ
                     vids.append(e)
                     seen.add(e["id"])
         except Exception:
@@ -282,40 +284,104 @@ def write_md(path: Path, meta: dict, body: str) -> None:
 
 
 # ---------- graph linking (Obsidian-ready wikilinks + tags) ----------
+STOPWORDS = set("""il lo la i gli le un uno una un' dell della dei delle degli di da in con su
+per non e ed o ma che come cosa se più nel nella negli delle agli alle ai oltre sia anche
+questo questa questi queste mio mia mio tuo suo loro nostro nostra voi tu io noi esso essa
+essere avere stare fare dire andare venire essere stato stata altri altra tutto tutta tutti
+molto molti poche poco ogni qualche poi quando dove perché quindi così infatti mentre invece
+solo sarà era sono sei siamo si sono state statti c' c'è cera dell'altra stessa stessi
+gente ragione volta volte parte cose caso modo tempo punto fatto fatta anno anni giorno giorni
+una due tre primo seconda terzo volta volta volte bene male peggio meglio cosa cose niente
+nulla tutti tutto qualcosa nessuno nessuna qualcuno qualche""".split())
+
+
+def _tokens(text: str):
+    import re as _re
+    for w in _re.findall(r"[A-Za-zÀ-ÿ]{4,}", text):
+        lw = w.lower()
+        if lw in STOPWORDS:
+            continue
+        yield lw
+
+
+def transcript_text(vid: str) -> str:
+    f = OUT / "transcripts" / f"{vid}.json"
+    if not f.exists():
+        return ""
+    try:
+        d = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return ""
+    return " ".join((seg.get("text") or "") for seg in (d.get("segments") or []))
+
+
+def compute_keywords(slug_title_text: str) -> dict[str, int]:
+    """Conteggi parole (stopword rimosse) da titolo+trascrizione."""
+    import collections
+    return collections.Counter(_tokens(slug_title_text))
+
+
 def link_pages() -> int:
-    # Modello folder: ogni pagina = content/pages/<slug>/<id>.index.md
+    # 1) raccogli i video (cartelle) con titolo + trascrizione
     pages = sorted((OUT / "pages").glob("*/*.index.md"))
     metas = {}
+    kws = {}           # slug -> dict(word -> tf)
+    df = {}            # word -> document frequency
     for p in pages:
         slug = p.parent.name
         meta, _ = parse_md(p)
-        metas[slug] = {"title": meta.get("title", slug), "tags": meta.get("tags", [])}
+        vid = str(meta.get("video_id") or "").strip()
+        title = str(meta.get("title") or slug)
+        text = title + " " + transcript_text(vid) if vid else title
+        kws[slug] = compute_keywords(text)
+        metas[slug] = {"title": title}
+        for w in kws[slug]:
+            df[w] = df.get(w, 0) + 1
 
-    tagmap: dict[str, list[str]] = {}
-    for slug, m in metas.items():
-        for t in m["tags"]:
-            tagmap.setdefault(str(t), []).append(slug)
+    n = max(1, len(metas))
+    # idf e peso discriminante: penalizza parole troppo comuni
+    def weight(w, tf):
+        wdf = df.get(w, 1)
+        return tf * (1.0 + (n - wdf) / n)
 
+    # soglia: considera "distintiva" solo una parola presente in <= max_df video
+    max_df = max(6, int(n * 0.08))
+
+    # 2) tag (concetti) per video: top keyword per peso
+    tags_of = {}
+    for slug, tf in kws.items():
+        scored = sorted(((weight(w, c), w) for w, c in tf.items() if df[w] <= max_df), reverse=True)
+        tags_of[slug] = [w for _, w in scored[:6]]
+
+    # 3) correlati: condividono keyword distintive
     updated = 0
-    for slug, m in metas.items():
-        rel = []
-        for t in m["tags"]:
-            for o in tagmap.get(str(t), []):
-                if o != slug and o not in rel:
-                    rel.append(o)
-        rel = rel[:10]
-        f = OUT / "pages" / slug / f"{slug.rsplit('-',1)[-1] if '-' in slug else slug}.index.md"
+    for slug in metas:
+        mytags = set(tags_of[slug])
+        scores = {}
+        for other in metas:
+            if other == slug:
+                continue
+            # somma del peso delle keyword condivise
+            s = 0.0
+            for w in (tags_of[other] or []):
+                if w in mytags and df.get(w, 1) <= max_df:
+                    s += weight(w, kws[slug].get(w, 1)) + weight(w, kws[other].get(w, 1))
+            if s > 0:
+                scores[other] = s
+        rel = [o for o, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:10]]
+        f = OUT / "pages" / slug / f"{slug.rsplit('-', 1)[-1] if '-' in slug else slug}.index.md"
         if not f.exists():
             got = list((OUT / "pages" / slug).glob("*.index.md"))
             f = got[0] if got else f
         meta, body = parse_md(f)
-        body = re.sub(r'\n## Correlati\s*\n(?:- .*\n?)*', '', body)   # idempotente
+        body = re.sub(r'\n## Correlati\s*\n(?:- .*\n?)*', '', body)
+        meta["tags"] = tags_of[slug]
         meta["related"] = rel
         block = "\n## Correlati\n" + "".join(
             f"- [[{o}|{metas[o]['title']}]]\n" for o in rel)
         write_md(f, meta, body.rstrip() + "\n" + block)
         updated += 1
-    print(f"link_pages: {updated} pagine aggiornate (grafo markdown)")
+    print(f"link_pages: {updated} pagine aggiornate (correlati a concetti)")
     return 0
 
 
