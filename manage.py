@@ -587,34 +587,44 @@ def cmd_refresh_all() -> int:
     thumbnail mancanti (non ri-scarica quelle già presenti)."""
     cfg = load_config()
     ok = fail = new = 0
+    import time
     for ch in cfg["channels"]:
-        print(f"canale: {ch.get('name')}")
-        for e in discover_channel(ch["url"]):
+        name = ch.get("name")
+        print(f"canale: {name}")
+        try:
+            items = discover_channel(ch["url"])
+        except Exception as ex:
+            print(f"  discover fallito ({name}): {ex}")
+            fail += 1
+            continue
+        for e in items:
             vid = e["id"]
             if is_blacklisted(vid):
                 continue
-            if find_folder(vid) is None:
-                # NUOVO video: import (info+subs+thumb)
-                try:
+            try:
+                if find_folder(vid) is None:
+                    # NUOVO video: import (info+subs+thumb)
                     ids = download(f"https://youtu.be/{vid}")
                     for v in (ids or [vid]):
                         ingest_video(v, source=f"https://youtu.be/{vid}", video_type_hint=e.get("type"))
                     new += 1
-                except Exception:
-                    fail += 1
-            else:
-                if refresh_video_meta(vid):   # solo metadati (views/like), NO subs, NO thumb
-                    ok += 1
                 else:
-                    fail += 1
+                    if refresh_video_meta(vid):   # solo metadati (views/like), NO subs, NO thumb
+                        ok += 1
+                    else:
+                        fail += 1
+            except Exception:
+                fail += 1
+            time.sleep(0.8)   # throttle per evitare 429 sui metadati
     print(f"refresh-all: metadati={ok} nuovi={new} falliti={fail}")
     cmd_thumbs()   # backfill SOLO thumbnail mancanti
-    return link_pages() or 0
+    link_pages()
+    return 0
 
 
 def cmd_thumbs() -> int:
     """Scarica le thumbnail mancanti nelle cartelle delle pagine (da info.json)."""
-    import urllib.request
+    import time, urllib.request
     n = 0
     for jf in RAW.glob("*.info.json"):
         vid = jf.stem.replace(".info", "")
@@ -634,6 +644,7 @@ def cmd_thumbs() -> int:
             n += 1
         except Exception:
             continue
+        time.sleep(0.8)   # throttle per evitare 429 sulle thumbnail
     print(f"thumbs: {n} thumbnail aggiunte")
     return 0
 
@@ -908,6 +919,8 @@ def main(argv: list[str]) -> int:
         return cmd_seed_live()
     if cmd == "thumbs":
         return cmd_thumbs()
+    if cmd == "refresh-all":
+        return cmd_refresh_all()
     if cmd == "fixlive":
         return cmd_fixlive()
     if cmd == "status":
