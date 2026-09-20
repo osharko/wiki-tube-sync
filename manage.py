@@ -291,7 +291,7 @@ essere avere stare fare dire andare venire essere stato stata altri altra tutto 
 molto molti poche poco ogni qualche poi quando dove perché quindi così infatti mentre invece
 solo sarà era sono sei siamo si sono state statti c' c'è cera dell'altra stessa stessi
 gente ragione volta volte parte cose caso modo tempo punto fatto fatta anno anni giorno giorni
-una due tre primo seconda terzo volta volta volte bene male peggio meglio cosa cose niente
+una due tre primo seconda terzo volta volte bene male peggio meglio cosa cose niente
 nulla tutti tutto qualcosa nessuno nessuna qualcuno qualche""".split())
 
 
@@ -304,6 +304,20 @@ def _tokens(text: str):
         yield lw
 
 
+def keyphrases(text: str) -> dict[str, int]:
+    """Parole + bigrammi significativi (stopword rimosse) con conteggio."""
+    import collections
+    toks = list(_tokens(text))
+    cnt = collections.Counter()
+    for t in toks:
+        cnt[t] += 1
+    for a, b in zip(toks, toks[1:]):
+        if a in STOPWORDS or b in STOPWORDS:
+            continue
+        cnt[a + " " + b] += 1
+    return cnt
+
+
 def transcript_text(vid: str) -> str:
     f = OUT / "transcripts" / f"{vid}.json"
     if not f.exists():
@@ -313,12 +327,6 @@ def transcript_text(vid: str) -> str:
     except json.JSONDecodeError:
         return ""
     return " ".join((seg.get("text") or "") for seg in (d.get("segments") or []))
-
-
-def compute_keywords(slug_title_text: str) -> dict[str, int]:
-    """Conteggi parole (stopword rimosse) da titolo+trascrizione."""
-    import collections
-    return collections.Counter(_tokens(slug_title_text))
 
 
 def link_pages() -> int:
@@ -333,27 +341,25 @@ def link_pages() -> int:
         vid = str(meta.get("video_id") or "").strip()
         title = str(meta.get("title") or slug)
         text = title + " " + transcript_text(vid) if vid else title
-        kws[slug] = compute_keywords(text)
+        kws[slug] = keyphrases(text)
         metas[slug] = {"title": title}
         for w in kws[slug]:
             df[w] = df.get(w, 0) + 1
 
     n = max(1, len(metas))
-    # idf e peso discriminante: penalizza parole troppo comuni
+    # peso: TF-IDF, con bonus per i bigrammi (concetti più specifici)
     def weight(w, tf):
         wdf = df.get(w, 1)
-        return tf * (1.0 + (n - wdf) / n)
+        b = tf * (1.0 + (n - wdf) / n)
+        return b * (2.5 if (" " in w) else 1.0)
 
-    # soglia: considera "distintiva" solo una parola presente in <= max_df video
-    max_df = max(6, int(n * 0.08))
+    max_df = max(6, int(n * 0.08))   # keyword "distintiva" se in <= max_df video
 
-    # 2) tag (concetti) per video: top keyword per peso
     tags_of = {}
     for slug, tf in kws.items():
         scored = sorted(((weight(w, c), w) for w, c in tf.items() if df[w] <= max_df), reverse=True)
         tags_of[slug] = [w for _, w in scored[:6]]
 
-    # 3) correlati: condividono keyword distintive
     updated = 0
     for slug in metas:
         mytags = set(tags_of[slug])
@@ -361,14 +367,16 @@ def link_pages() -> int:
         for other in metas:
             if other == slug:
                 continue
-            # somma del peso delle keyword condivise
             s = 0.0
             for w in (tags_of[other] or []):
                 if w in mytags and df.get(w, 1) <= max_df:
                     s += weight(w, kws[slug].get(w, 1)) + weight(w, kws[other].get(w, 1))
             if s > 0:
                 scores[other] = s
-        rel = [o for o, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:10]]
+        top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        rel = [o for o, _ in top[:10]]
+        # QC (0-100): forza del collegamento migliore; sotto soglia -> revisione
+        qc = min(100, int(top[0][1] * 4) if top else 0)
         f = OUT / "pages" / slug / f"{slug.rsplit('-', 1)[-1] if '-' in slug else slug}.index.md"
         if not f.exists():
             got = list((OUT / "pages" / slug).glob("*.index.md"))
@@ -377,11 +385,12 @@ def link_pages() -> int:
         body = re.sub(r'\n## Correlati\s*\n(?:- .*\n?)*', '', body)
         meta["tags"] = tags_of[slug]
         meta["related"] = rel
+        meta["qc"] = qc
         block = "\n## Correlati\n" + "".join(
             f"- [[{o}|{metas[o]['title']}]]\n" for o in rel)
         write_md(f, meta, body.rstrip() + "\n" + block)
         updated += 1
-    print(f"link_pages: {updated} pagine aggiornate (correlati a concetti)")
+    print(f"link_pages: {updated} pagine aggiornate (correlati a concetti + qc)")
     return 0
 
 
