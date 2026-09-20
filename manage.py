@@ -502,6 +502,31 @@ def cmd_build() -> int:
     return link_pages() or 0
 
 
+def cmd_mark_live() -> int:
+    """Rimarca `video_type: live` su tutti i video presenti nella tab /streams."""
+    cfg = load_config()
+    fixed = 0
+    for ch in cfg["channels"]:
+        tab = ch["url"].replace("/videos", "/streams")
+        if tab == ch["url"]:
+            continue
+        for e in discover(tab):
+            d = find_folder(e["id"])
+            if d is None:
+                continue
+            f = page_index(d)
+            if f is None:
+                continue
+            meta, body = parse_md(f)
+            if meta.get("video_type") == "live":
+                continue
+            meta["video_type"] = "live"
+            write_md(f, meta, body)
+            fixed += 1
+    print(f"mark_live: {fixed} video marcati come live")
+    return link_pages() or 0
+
+
 def cmd_status() -> int:
     have = sorted(p.stem.replace(".info", "") for p in RAW.glob("*.info.json"))
     cfg = load_config()
@@ -729,6 +754,8 @@ def main(argv: list[str]) -> int:
         return cmd_refresh(rest[0] if rest else None)
     if cmd == "migrate":
         return cmd_migrate()
+    if cmd == "marklive":
+        return cmd_mark_live()
     if cmd == "status":
         return cmd_status()
     print(__doc__)

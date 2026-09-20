@@ -210,6 +210,8 @@ def video_type(meta: dict, hint: str | None = None) -> str:
         return 'live'
     if hint == 'short':
         return 'short'
+    if hint == 'live':
+        return 'live'
     if (meta.get('duration') or 0) < 60:
         return 'short'
     return 'video'
