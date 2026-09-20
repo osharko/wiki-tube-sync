@@ -1,0 +1,15 @@
+# Configurazione pipeline wiki
+# Le chiavi `channels` sono le fonti da importare (tutti i video nuovi).
+# `blacklist` è la lista di video_id da SKIPPARE (es. video da rimuovere/privare).
+
+channels:
+  - name: "Mortebianca"
+    url: "https://www.youtube.com/@Mortebianca/videos"
+  - name: "Mortebianca Secondo Canale"
+    url: "https://www.youtube.com/@mortebiancasecondocanale/videos"
+
+# Video da escludere dall'ingest (ogni riga un video_id).
+# Puoi anche usare commenti; gestiti come YAML.
+blacklist:
+  # - "XXXXXXXXXXX"
+  # - "YYYYYYYYYYY"

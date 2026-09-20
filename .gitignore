@@ -1,0 +1,14 @@
+# venv
+/venv/
+venv/
+
+# python/data
+__pycache__/
+*.pyc
+/raw_subs/
+/content/
+/wiki-src/
+/data/
+
+# local env
+.env
