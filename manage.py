@@ -841,8 +841,9 @@ def cmd_playlists() -> int:
 def refresh_video_meta(vid: str) -> bool:
     """Re-fetch info.json (no subs) and update view/like/counts in the page."""
     try:
+        # NB: senza "-f best" (fallisce su alcuni video: "Requested format is not available")
         run_yt(["--skip-download", "--write-info-json", "--no-write-subs",
-                "-o", str(RAW / "%(id)s.%(ext)s"), "-f", "best",
+                "-o", str(RAW / "%(id)s.%(ext)s"),
                 f"https://youtu.be/{vid}"])
     except Exception:
         return False
